@@ -1,17 +1,17 @@
 from fastapi import FastAPI, HTTPException
-import joblib
 from pydantic import BaseModel
+import joblib
+import numpy as np
 
 app = FastAPI()
 
-# GET request
-@app.get("/")
-def read_root():
-    return {"message": "Coursera Prediction"}
-
 # Load your models
-model = joblib.load('kmens_model.joblib')
-scaler = joblib.load('kmens_scaler.joblib')
+try:
+    model = joblib.load('kmens_model.joblib')
+    scaler = joblib.load('kmens_scaler.joblib')
+except Exception as e:
+    raise RuntimeError(f"Error loading models: {e}")
+
 
 # Define input data model
 class InputFeatures(BaseModel):
@@ -20,27 +20,43 @@ class InputFeatures(BaseModel):
     Type: str
     Duration_Weeks: str
 
+
 def preprocessing(input_features: InputFeatures):
+    # Create a dictionary with input features in the required order
     dict_f = {
         'Provider': input_features.Provider,
         'Level': input_features.Level,
         'Type': input_features.Type,
         'Duration_Weeks': input_features.Duration_Weeks
     }
-    # Convert dictionary values to a list in the correct order
-    features_list = [dict_f[key] for key in sorted(dict_f)]
-    # Scale the input features
-    scaled_features = scaler.transform([features_list])
+
+    # Ensure the features list is created in the correct order expected by the model
+    # The order of keys here should match the order expected by the scaler/model
+    features_list = [dict_f[key] for key in
+                     ['Provider', 'Level', 'Type', 'Duration_Weeks']]
+
+    # Convert features to a 2D array to be compatible with scaler.transform
+    try:
+        scaled_features = scaler.transform(
+            [features_list])  # Ensure this is a 2D array
+    except Exception as e:
+        raise HTTPException(status_code=400,
+                            detail=f"Error in feature scaling: {e}")
+
     return scaled_features
 
-@app.get("/predict")
-def predict(input_features: InputFeatures):
-    return preprocessing(input_features)
+
+@app.get("/")
+def read_root():
+    return {"message": "Coursera Prediction"}
 
 
 # Define the /predict endpoint to handle POST requests
 @app.post("/predict")
 async def predict(input_features: InputFeatures):
-    data = preprocessing(input_features)
-    y_pred = model.predict(data)
-    return {"pred": y_pred.tolist()[0]}
+    try:
+        data = preprocessing(input_features)
+        y_pred = model.predict(data)
+        return {"pred": y_pred.tolist()[0]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction error: {e}")
